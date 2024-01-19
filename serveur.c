@@ -1,95 +1,65 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <signal.h>
 #include <unistd.h>
 #include <string.h>
-#include <time.h>
+#include <signal.h>
+#include <errno.h>
 
-#define MAX_MESSAGE_LENGTH 1024
+#define DELAY 500 // Définir un délai en microsecondes entre les envois de signaux
 
-// Structure pour maintenir l'état des signaux reçus et construire le message.
-typedef struct {
-    int bit_count;                      // Compteur de bits reçus pour le caractère actuel
-    char message[MAX_MESSAGE_LENGTH];   // Buffer pour accumuler le message reçu
-    int current_bit;                    // Valeur du bit actuel (0 ou 1)
-    int current_char_index;             // Position actuelle dans le buffer du message
-} SignalState;
-
-// Variable globale unique pour stocker l'état des signaux.
-SignalState signal_state = {0, {0}, 0, 0};
-
-// Prototypes de fonctions pour une meilleure lisibilité.
-void handle_signal(int signum);
-void setup_signal_handling(void);
-void log_message(const char *received_message);
-void reset_message(void);
-
-int main() {
-    // Tentative d'ouverture du fichier de log pour écrire les messages reçus.
-    FILE *log_file = fopen("conversations.log", "a");
-    if (log_file == NULL) {
-        perror("Erreur lors de l'ouverture du fichier de log");
-        exit(EXIT_FAILURE); // Quitter le programme si le fichier ne peut pas être ouvert
-    }
-
-    // Configuration des gestionnaires de signaux pour SIGUSR1 et SIGUSR2.
-    setup_signal_handling();
-
-    // Affichage du PID du serveur pour que le client sache où envoyer les signaux.
-    printf("Serveur prêt. PID: %d\n", getpid());
-
-    // Boucle principale du serveur en attente de signaux.
-    while (1) {
-        pause(); // Pause jusqu'à la réception d'un signal
-    }
-
-    // Le code ci-dessous ne sera jamais atteint. Si nécessaire, fermer le fichier log.
-    fclose(log_file);
-    return 0;
-}
-
-// Fonction pour écrire un message reçu dans le fichier de log avec horodatage.
-void log_message(const char *received_message) {
-    // Ouvre le fichier de log en mode ajout.
-    FILE *log_file = fopen("conversations.log", "a");
-    if (log_file == NULL) {
-        perror("Erreur lors de l'ouverture du fichier de log");
+/**
+ * Envoie un signal spécifié à un PID de serveur donné.
+ * @param server_pid Le PID du processus serveur.
+ * @param signal Le signal à envoyer.
+ */
+void send_signal(pid_t server_pid, int signal) {
+    if (kill(server_pid, signal) == -1) {
+        perror("Erreur lors de l'envoi du signal");
         exit(EXIT_FAILURE);
     }
-
-    // Obtient l'horodatage actuel et le formate.
-    time_t now = time(NULL);
-    char timestamp[30];
-    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", localtime(&now));
-    
-    // Écrit le message et l'horodatage dans le fichier de log.
-    fprintf(log_file, "[%s] %s\n", timestamp, received_message);
-    fflush(log_file); // Force l'écriture des données sur le disque
-
-    // Ferme le fichier de log après chaque écriture pour garantir la mise à jour du fichier.
-    fclose(log_file);
+    usleep(DELAY);
 }
 
-// Fonction pour réinitialiser le buffer du message après la réception d'un message complet.
-void reset_message() {
-    // Réinitialise le buffer du message à zéro.
-    memset(signal_state.message, 0, MAX_MESSAGE_LENGTH);
-    signal_state.current_char_index = 0; // Remet l'index à zéro pour le prochain message
+/**
+ * Envoie un caractère sous forme de signaux au serveur.
+ * @param c Le caractère à envoyer.
+ * @param server_pid Le PID du processus serveur.
+ */
+void send_char_as_signals(char c, pid_t server_pid) {
+    for (int i = 7; i >= 0; --i) {
+        int bit = (c >> i) & 1;
+        send_signal(server_pid, bit ? SIGUSR2 : SIGUSR1);
+    }
 }
 
-// Gestionnaire de signaux pour traiter SIGUSR1 et SIGUSR2.
-void handle_signal(int signum) {
-    // Détermine le bit actuel en fonction du signal reçu et l'ajoute au message.
-    signal_state.current_bit = (signum == SIGUSR2) ? 1 : 0;
-    signal_state.message[signal_state.current_char_index] = (signal_state.message[signal_state.current_char_index] << 1) | signal_state.current_bit;
-    signal_state.bit_count++; // Incrémente le compteur de bits
+/**
+ * Valide les arguments du programme.
+ * @param argc Le nombre d'arguments.
+ * @param argv Les arguments du programme.
+ * @return 1 si les arguments sont valides, sinon 0.
+ */
+int validate_arguments(int argc, char *argv[]) {
+    if (argc != 3 || atoi(argv[1]) <= 0) {
+        fprintf(stderr, "Usage: %s <Server PID> <Message>\n", argv[0]);
+        return 0;
+    }
+    return 1;
+}
 
-    // Si un octet complet a été reçu, passe au caractère suivant.
-    if (signal_state.bit_count == 8) {
-        signal_state.bit_count = 0; // Réinitialise le compteur de bits
-        signal_state.current_char_index++; // Passe à la position suivante dans le buffer
+int main(int argc, char *argv[]) {
+    if (!validate_arguments(argc, argv)) {
+        return 1;
+    }
 
-        // Si le caractère nul est atteint, le message est complet.
-        if (signal_state.message[signal_state.current_char_index - 1] == '\0') {
-            log_message(signal_state.message); // Écrit le message dans le fichier de log
-            reset_message(); // Réinitialise le buffer pour le prochain
+    pid_t server_pid = (pid_t)atoi(argv[1]);
+    char *message = argv[2];
+
+    while (*message) {
+        send_char_as_signals(*message++, server_pid);
+    }
+
+    send_char_as_signals('\0', server_pid);
+
+    printf("Message envoyé au serveur avec le PID %d\n", server_pid);
+    return 0;
+}
