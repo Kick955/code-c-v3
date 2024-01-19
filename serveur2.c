@@ -14,7 +14,6 @@ static struct {
     int message_index;
 } server_state = {0, {0}, 0};
 
-
 // Fonction pour écrire le message dans un fichier log
 void write_to_log(const char *msg) {
     FILE *log_file = fopen("conversations.log", "a");
@@ -34,23 +33,23 @@ void write_to_log(const char *msg) {
 // Gestionnaire de signal pour SIGUSR1 et SIGUSR2
 void signal_handler(int signum) {
     // Ajoute le bit au message actuel
-    message[message_index] <<= 1;
+    server_state.message[server_state.message_index] <<= 1;
     if (signum == SIGUSR2) {
-        message[message_index] |= 1;
+        server_state.message[server_state.message_index] |= 1;
     }
 
-    bit_count++;
+    server_state.bit_count++;
     
     // Vérifie si un caractère est complet
-    if (bit_count == 8) {
-        bit_count = 0;
-        if (message[message_index] == '\0') { // Fin du message
-            write_to_log(message);
-            printf("%s\n", message); // Affiche le message
-            memset(message, 0, MAX_MESSAGE_LENGTH); // Réinitialise le message pour le prochain
-            message_index = 0;
+    if (server_state.bit_count == 8) {
+        server_state.bit_count = 0;
+        if (server_state.message[server_state.message_index] == '\0') { // Fin du message
+            write_to_log(server_state.message);
+            printf("%s\n", server_state.message); // Affiche le message
+            memset(server_state.message, 0, MAX_MESSAGE_LENGTH); // Réinitialise le message pour le prochain
+            server_state.message_index = 0;
         } else {
-            message_index++;
+            server_state.message_index++;
         }
     }
 }
@@ -72,7 +71,6 @@ int main() {
         pause();
     }
 
-    return 0; // Cette ligne ne sera jamais atteinte
+    // Cette ligne ne sera jamais atteinte
+    return 0;
 }
-
-
