@@ -1,65 +1,91 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <unistd.h>
 #include <string.h>
-#include <signal.h>
-#include <errno.h>
+#include <time.h>
 
-#define DELAY 500 // Définir un délai en microsecondes entre les envois de signaux
+#define MAX_MESSAGE_LENGTH 1024
 
-/**
- * Envoie un signal spécifié à un PID de serveur donné.
- * @param server_pid Le PID du processus serveur.
- * @param signal Le signal à envoyer.
- */
-void send_signal(pid_t server_pid, int signal) {
-    if (kill(server_pid, signal) == -1) {
-        perror("Erreur lors de l'envoi du signal");
+// Structure pour maintenir l'état du signal.
+typedef struct {
+    int bit_count;                  // Compteur de bits pour le caractère en cours
+    char message[MAX_MESSAGE_LENGTH];    // Buffer pour stocker le message reçu
+    int current_bit;                // Dernier bit reçu (0 ou 1)
+    int current_char_index;         // Index du caractère actuel dans le message
+} SignalState;
+
+// Déclaration d'une variable globale unique conformément aux instructions
+SignalState signal_state = {0, {0}, 0, 0};
+
+// Déclaration anticipée des fonctions
+void handle_signal(int signum);
+void setup_signal_handling(void);
+void log_message(const char *received_message);
+void reset_message(void);
+
+int main() {
+    FILE *log_file = fopen("conversations.log", "a");
+    if (log_file == NULL) {
+        perror("Erreur lors de l'ouverture du fichier de log");
         exit(EXIT_FAILURE);
     }
-    usleep(DELAY);
-}
 
-/**
- * Envoie un caractère sous forme de signaux au serveur.
- * @param c Le caractère à envoyer.
- * @param server_pid Le PID du processus serveur.
- */
-void send_char_as_signals(char c, pid_t server_pid) {
-    for (int i = 7; i >= 0; --i) {
-        int bit = (c >> i) & 1;
-        send_signal(server_pid, bit ? SIGUSR2 : SIGUSR1);
-    }
-}
+    setup_signal_handling();
 
-/**
- * Valide les arguments du programme.
- * @param argc Le nombre d'arguments.
- * @param argv Les arguments du programme.
- * @return 1 si les arguments sont valides, sinon 0.
- */
-int validate_arguments(int argc, char *argv[]) {
-    if (argc != 3 || atoi(argv[1]) <= 0) {
-        fprintf(stderr, "Usage: %s <Server PID> <Message>\n", argv[0]);
-        return 0;
-    }
-    return 1;
-}
+    printf("Serveur prêt. PID: %d\n", getpid());
 
-int main(int argc, char *argv[]) {
-    if (!validate_arguments(argc, argv)) {
-        return 1;
+    while (1) {
+        pause(); // Met le processus en pause jusqu'à ce qu'un signal soit reçu
     }
 
-    pid_t server_pid = (pid_t)atoi(argv[1]);
-    char *message = argv[2];
-
-    while (*message) {
-        send_char_as_signals(*message++, server_pid);
-    }
-
-    send_char_as_signals('\0', server_pid);
-
-    printf("Message envoyé au serveur avec le PID %d\n", server_pid);
+    // Cette ligne ne sera jamais atteinte
+    fclose(log_file);
     return 0;
+}
+
+void log_message(const char *received_message) {
+    FILE *log_file = fopen("conversations.log", "a");
+    if (log_file == NULL) {
+        perror("Erreur lors de l'ouverture du fichier de log");
+        exit(EXIT_FAILURE);
+    }
+
+    time_t now = time(NULL);
+    char timestamp[30];
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    
+    fprintf(log_file, "[%s] %s\n", timestamp, received_message);
+    fflush(log_file);
+
+    fclose(log_file);
+}
+
+void reset_message() {
+    memset(signal_state.message, 0, signal_state.current_char_index + 1);
+    signal_state.current_char_index = 0;
+}
+
+void handle_signal(int signum) {
+    signal_state.current_bit = (signum == SIGUSR2) ? 1 : 0;
+    signal_state.message[signal_state.current_char_index] = (signal_state.message[signal_state.current_char_index] << 1) | signal_state.current_bit;
+    signal_state.bit_count++;
+
+    if (signal_state.bit_count == 8) {
+        signal_state.bit_count = 0;
+        signal_state.current_char_index++;
+
+        if (signal_state.message[signal_state.current_char_index - 1] == '\0') {
+            log_message(signal_state.message);
+            reset_message();
+        }
+    }
+}
+
+void setup_signal_handling() {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handle_signal;
+    sigaction(SIGUSR1, &sa, NULL);
+    sigaction(SIGUSR2, &sa, NULL);
 }
