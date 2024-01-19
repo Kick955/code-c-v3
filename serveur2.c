@@ -68,6 +68,7 @@ void setup_signal_handling() {
 
 int main() {
     printf("Serveur prêt. PID: %d\n", getpid()); // Affiche le PID du serveur
+    printf("En attente de nouveaux messages\n");
     setup_signal_handling(); // Initialise la gestion des signaux
 
     // Boucle infinie pour attendre les signaux indéfiniment
